@@ -14,11 +14,13 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 /// A STAC catalogue whose search and pixels answer anonymous browser requests,
 /// as tested on 10 November 2026 (bench/results/2026-11-10-catalogue-access.txt).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Host {
     /// Element 84's Earth Search on AWS, the checker's own source.
     EarthSearch,
@@ -214,17 +216,52 @@ fn text(props: &Map<String, Value>, key: &str) -> String {
     }
 }
 
+/// The parts of a STAC item this project reads. STAC is JSON, so a few
+/// typed fields are enough; anything else in the reply is ignored.
+#[derive(Deserialize)]
+struct Item {
+    id: String,
+    #[serde(default)]
+    properties: Map<String, Value>,
+    #[serde(default)]
+    assets: HashMap<String, Asset>,
+}
+
+#[derive(Deserialize)]
+struct Asset {
+    href: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Link {
+    rel: Option<String>,
+    href: Option<String>,
+    body: Option<Value>,
+}
+
+/// One page of a STAC API search reply.
+#[derive(Deserialize)]
+struct ItemCollection {
+    #[serde(default)]
+    features: Vec<Item>,
+    #[serde(default)]
+    links: Vec<Link>,
+}
+
 /// Read one STAC item into a `Scene`, or `None` if it lacks a required band
 /// as an https link. An `s3://` link is on a requester-pays bucket that a
 /// browser cannot read.
-fn parse_item(host: Host, item: &stac::Item) -> Option<Scene> {
-    let props = &item.properties.additional_fields;
-    let epsg = props.get("proj:epsg").and_then(Value::as_u64)? as u32;
-    let datetime = item.properties.datetime?.to_rfc3339();
+fn parse_item(host: Host, item: &Item) -> Option<Scene> {
+    let props = &item.properties;
+    let epsg = props.get("proj:epsg").and_then(Value::as_f64)? as u32;
+    let datetime = text(props, "datetime");
+    if datetime.len() < 10 {
+        return None;
+    }
 
     let mut hrefs = HashMap::new();
     for band in Band::ALL {
-        let href = item.assets.get(host.asset_key(band)).map(|a| a.href.clone());
+        let href = item.assets.get(host.asset_key(band)).and_then(|a| a.href.clone());
         match href {
             Some(h) if h.starts_with("https://") => {
                 hrefs.insert(band, h);
@@ -254,7 +291,7 @@ fn parse_item(host: Host, item: &stac::Item) -> Option<Scene> {
         epsg,
         tile,
         platform: text(props, "platform").to_lowercase(),
-        created: item.properties.created.clone().unwrap_or_default(),
+        created: text(props, "created"),
         baseline: text(props, "s2:processing_baseline").parse().unwrap_or(0.0),
         datatake,
         boa_offset_applied: props.get("earthsearch:boa_offset_applied") == Some(&Value::Bool(true)),
@@ -314,17 +351,17 @@ pub async fn search(
         if !response.status().is_success() {
             return Err(format!("{} search returned {}", host.name(), response.status()));
         }
-        let page: stac::ItemCollection = response
+        let page: ItemCollection = response
             .json()
             .await
             .map_err(|e| format!("{} sent a page that is not a STAC item collection: {e}", host.name()))?;
-        collected.extend(page.items.iter().filter_map(|item| parse_item(host, item)));
+        collected.extend(page.features.iter().filter_map(|item| parse_item(host, item)));
 
         // The next page is a POST link that carries its own body.
-        match page.links.iter().find(|l| l.rel == "next") {
-            Some(next) if next.body.is_some() => {
-                url = next.href.clone();
-                body = Value::Object(next.body.clone().unwrap_or_default());
+        match page.links.iter().find(|l| l.rel.as_deref() == Some("next")) {
+            Some(Link { href: Some(href), body: Some(next_body), .. }) => {
+                url = href.clone();
+                body = next_body.clone();
             }
             _ => break,
         }
@@ -370,6 +407,7 @@ pub fn sign(scenes: &mut [Scene], token: &str) {
 pub struct Observation {
     pub datatake: String,
     pub datetime: String,
+    pub date: String,
     /// Worst cloud cover among its tiles.
     pub cloud_cover: f64,
     pub scenes: Vec<Scene>,
@@ -398,6 +436,7 @@ pub fn observations_on_grid(scenes: &[Scene], epsg: u32) -> Vec<Observation> {
             let first = on_grid.first()?;
             Some(Observation {
                 datetime: first.datetime.clone(),
+                date: first.date.clone(),
                 cloud_cover: on_grid.iter().map(|s| s.cloud_cover).fold(f64::MIN, f64::max),
                 datatake,
                 scenes: on_grid,
@@ -406,6 +445,15 @@ pub fn observations_on_grid(scenes: &[Scene], epsg: u32) -> Vec<Observation> {
         .collect();
     observations.sort_by(|a, b| a.datetime.cmp(&b.datetime));
     observations
+}
+
+/// Overpasses that exist for the area but have no tile in this zone.
+pub fn unreachable_count(scenes: &[Scene], epsg: u32) -> usize {
+    let mut all: Vec<&str> = scenes.iter().map(|s| s.datatake.as_str()).collect();
+    all.sort();
+    all.dedup();
+    let reachable = observations_on_grid(scenes, epsg).len();
+    all.len() - reachable
 }
 
 /// The UTM zone that reaches the most overpasses, ties going to `preferred`,

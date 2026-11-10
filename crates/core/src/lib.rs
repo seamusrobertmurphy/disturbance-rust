@@ -7,5 +7,13 @@
 //! outside this crate; anything without `pub` stays private.
 
 pub mod cog;
+pub mod composite;
+pub mod defaults;
+pub mod deltas;
 pub mod grid;
+pub mod mask;
+pub mod patches;
+pub mod rasterize;
+pub mod render;
+pub mod run;
 pub mod stac;

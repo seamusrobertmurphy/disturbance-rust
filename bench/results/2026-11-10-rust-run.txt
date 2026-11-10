@@ -1,0 +1,29 @@
+Rust port, Earth Search, test squares at 44.0 N, 122.5 W, 2024-08-01/2024-09-01 against 2025-08-01/2025-09-01, cloud 30, SCL mask, shift on.
+Class pixel counts are for checking the port against bench/results/2026-11-10-timing-*.txt (hectares there divided by 0.04).
+
+./target/release/disturbance run --ha 1600 --out bench/out/rust-1600
+Earth Search, EPSG:32610 grid 203 x 202 px, observations 4+6
+  total 13.71 s = search 0.46 + headers 1.72 + download 10.47 + decode 0.98 + method 0.07 + draw 0.01
+  168 requests, 148.5 MB, 84 files, 1 blocks
+  dNDVI: shift applied (-0.0348), breaks used 0.0652/0.1652/0.3152, class pixel counts for the port check [477, 75, 3], 50 flagged patches
+  dNDMI: shift applied (-0.0276), breaks used 0.1224/0.2724/0.4224, class pixel counts for the port check [197, 10, 1], 7 flagged patches
+  dNBR: shift applied (+0.0191), breaks used 0.1191/0.2891/0.4591, class pixel counts for the port check [6404, 72, 0], 31 flagged patches
+  warning: 8.7 percent of observed pixels had fewer than 4 clear looks in one of the two windows.
+
+/usr/bin/time -l ./target/release/disturbance run --ha 25600 --out bench/out/rust-25600
+Earth Search, EPSG:32610 grid 807 x 806 px, observations 4+6
+  total 42.57 s = search 0.49 + headers 1.66 + download 32.94 + decode 6.11 + method 1.21 + draw 0.15
+  332 requests, 409.0 MB, 84 files, 4 blocks
+  dNDVI: shift applied (-0.0235), breaks used 0.0765/0.1765/0.3265, class pixel counts for the port check [10448, 1840, 2028], 560 flagged patches
+  dNDMI: shift applied (-0.0198), breaks used 0.1302/0.2802/0.4302, class pixel counts for the port check [7308, 1304, 1815], 326 flagged patches
+  dNBR: shift not applied (+0.0096), breaks used 0.1000/0.2700/0.4400, class pixel counts for the port check [91223, 3894, 10], 603 flagged patches
+  warning: 14.6 percent of observed pixels had fewer than 4 clear looks in one of the two windows.
+       42.78 real         8.94 user         2.38 sys
+           522095104  peak memory footprint
+
+Checker (bench/results/2026-11-10-timing-*.txt) as pixel counts: 1,600 ha dNDVI 477/75/3, dNDMI 197/10/1, dNBR 6404/72/0;
+25,600 ha dNDVI 10448/1840/2028, dNDMI 7308/1304/1815, dNBR 91223/3894/10. All match.
+
+Browser, Chrome on this Mac, site served from 127.0.0.1:8765, stats from the page's result:
+1,600 ha: 15.6 s; search 0.43, headers 1.80, download 11.78, decode 1.36, method 0.06, draw 0.04; 148,540,479 bytes, 168 requests; patches 50/7/31.
+25,600 ha, run straight after the 1,600 ha run over the same scenes, so the browser cache may have served some bytes: 33.0 s; search 0.26, headers 0.23, download 20.73, decode 8.22, method 0.93, draw 2.47; 409,013,374 bytes, 332 requests; patches 560/326/603.

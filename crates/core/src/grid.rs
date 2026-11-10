@@ -43,14 +43,44 @@ fn utm_definition(epsg: u32) -> Result<String, String> {
     ))
 }
 
+/// Conversions between longitude and latitude and one UTM zone, set up once
+/// and reused, because setting up a projection costs far more than using it.
+pub struct Utm {
+    lon_lat: Proj,
+    utm: Proj,
+}
+
+impl Utm {
+    pub fn new(epsg: u32) -> Result<Utm, String> {
+        Ok(Utm {
+            lon_lat: Proj::from_proj_string("+proj=longlat +datum=WGS84 +no_defs").map_err(|e| e.to_string())?,
+            utm: Proj::from_proj_string(&utm_definition(epsg)?).map_err(|e| e.to_string())?,
+        })
+    }
+
+    /// Degrees to metres.
+    pub fn forward(&self, lon: f64, lat: f64) -> (f64, f64) {
+        // proj4rs works in radians, unlike proj4js.
+        let mut point = (lon.to_radians(), lat.to_radians(), 0.0);
+        match proj4rs::transform::transform(&self.lon_lat, &self.utm, &mut point) {
+            Ok(()) => (point.0, point.1),
+            Err(_) => (f64::NAN, f64::NAN),
+        }
+    }
+
+    /// Metres to degrees.
+    pub fn inverse(&self, x: f64, y: f64) -> (f64, f64) {
+        let mut point = (x, y, 0.0);
+        match proj4rs::transform::transform(&self.utm, &self.lon_lat, &mut point) {
+            Ok(()) => (point.0.to_degrees(), point.1.to_degrees()),
+            Err(_) => (f64::NAN, f64::NAN),
+        }
+    }
+}
+
 /// Longitude and latitude in degrees to UTM metres.
 pub fn lon_lat_to_utm(epsg: u32, lon: f64, lat: f64) -> Result<(f64, f64), String> {
-    let from = Proj::from_proj_string("+proj=longlat +datum=WGS84 +no_defs").map_err(|e| e.to_string())?;
-    let to = Proj::from_proj_string(&utm_definition(epsg)?).map_err(|e| e.to_string())?;
-    // proj4rs works in radians, unlike proj4js.
-    let mut point = (lon.to_radians(), lat.to_radians(), 0.0);
-    proj4rs::transform::transform(&from, &to, &mut point).map_err(|e| e.to_string())?;
-    Ok((point.0, point.1))
+    Ok(Utm::new(epsg)?.forward(lon, lat))
 }
 
 /// The UTM zone a point falls in.
@@ -64,11 +94,12 @@ pub fn utm_epsg_for_lon_lat(lon: f64, lat: f64) -> u32 {
 /// degrees as west, south, east, north. The checker's `gridForBounds`.
 pub fn grid_for_bounds(epsg: u32, bounds: [f64; 4], resolution: f64) -> Result<TargetGrid, String> {
     let [west, south, east, north] = bounds;
+    let utm = Utm::new(epsg)?;
     let corners = [
-        lon_lat_to_utm(epsg, west, south)?,
-        lon_lat_to_utm(epsg, east, south)?,
-        lon_lat_to_utm(epsg, west, north)?,
-        lon_lat_to_utm(epsg, east, north)?,
+        utm.forward(west, south),
+        utm.forward(east, south),
+        utm.forward(west, north),
+        utm.forward(east, north),
     ];
     let min = |f: fn(&(f64, f64)) -> f64| corners.iter().map(f).fold(f64::INFINITY, f64::min);
     let max = |f: fn(&(f64, f64)) -> f64| corners.iter().map(f).fold(f64::NEG_INFINITY, f64::max);
@@ -110,4 +141,14 @@ pub fn blocks_for(grid: &TargetGrid, block_size: u32) -> Vec<GridBlock> {
         }
     }
     blocks
+}
+
+/// The grid's bounds in metres as west, south, east, north.
+pub fn grid_bbox(grid: &TargetGrid) -> [f64; 4] {
+    [
+        grid.origin_x,
+        grid.origin_y - grid.height as f64 * grid.resolution,
+        grid.origin_x + grid.width as f64 * grid.resolution,
+        grid.origin_y,
+    ]
 }

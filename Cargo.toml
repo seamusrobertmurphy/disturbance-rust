@@ -2,8 +2,13 @@
 # the file that pins every dependency's exact version.
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/cli"]
+members = ["crates/core", "crates/cli", "crates/web"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+
+# Smaller, faster WebAssembly.
+[profile.release]
+lto = true
+codegen-units = 1
