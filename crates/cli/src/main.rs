@@ -1,10 +1,17 @@
 //! `disturbance`, the terminal front end to disturbance-core.
 //!
-//! One command so far, `bytes`. It searches Earth Search and Planetary
-//! Computer for the scenes the checker would use on a square test area, reads
-//! only the image headers, and reports how many bytes the pixel reads cost.
-//! It compares geotiff.js's choice of resolution with reading every band at
-//! 20 m. No pixels are downloaded.
+//! Two commands.
+//!
+//! `run` does the whole check on a boundary file or a test square and writes
+//! the map layers as PNG, the flagged patches as CSV and everything else as
+//! JSON, then prints the time each stage took.
+//!
+//!   cargo run --release -p disturbance-cli -- run --geojson boundary.geojson --out results
+//!   cargo run --release -p disturbance-cli -- run --ha 25600
+//!
+//! `bytes` reads only the image headers and reports how many bytes the
+//! checker's pixel reads cost, against reading every band at 20 m. No pixels
+//! are downloaded.
 //!
 //!   cargo run --release -p disturbance-cli -- bytes --ha 25600
 //!
@@ -16,11 +23,10 @@
 //! in R or `lambda o: o.cloud_cover` in Python.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use disturbance_core::cog::{self, Cog, Traffic};
+use disturbance_core::run::{self, Aoi, RunParams};
 use disturbance_core::grid::{self, BLOCK_SIZE, GRID_RESOLUTION};
 use disturbance_core::stac::{self, Band, Host, Observation, SearchParams};
 use futures::stream::{self, StreamExt};
@@ -37,6 +43,10 @@ const ANALYSIS_BANDS: [Band; 6] = [Band::Red, Band::Nir, Band::Nir08, Band::Swir
 const EXTRA_BANDS: [Band; 4] = [Band::Blue, Band::Green, Band::Aot, Band::Wvp];
 
 struct Args {
+    command: String,
+    geojson: Option<String>,
+    out: Option<String>,
+    normalise: bool,
     hosts: Vec<Host>,
     ha: f64,
     lat: f64,
@@ -48,14 +58,19 @@ struct Args {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: disturbance bytes [--host earth-search|planetary-computer|both] [--ha 1600] \
-         [--lat 44.0] [--lon -122.5] [--pre 2024-08-01/2024-09-01] [--post 2025-08-01/2025-09-01] [--max-cloud 30]"
+        "usage: disturbance run|bytes [--host earth-search|planetary-computer|both] [--geojson FILE] [--ha 1600] \
+         [--lat 44.0] [--lon -122.5] [--pre 2024-08-01/2024-09-01] [--post 2025-08-01/2025-09-01] [--max-cloud 30] \
+         [--no-shift] [--out FOLDER]"
     );
     std::process::exit(2)
 }
 
 fn parse_args() -> Args {
     let mut args = Args {
+        command: String::new(),
+        geojson: None,
+        out: None,
+        normalise: true,
         hosts: vec![Host::EarthSearch, Host::PlanetaryComputer],
         ha: 1600.0,
         lat: 44.0,
@@ -65,15 +80,25 @@ fn parse_args() -> Args {
         max_cloud: 30.0,
     };
     let raw: Vec<String> = std::env::args().skip(1).collect();
-    if raw.first().map(String::as_str) != Some("bytes") {
-        usage();
-    }
+    args.command = match raw.first().map(String::as_str) {
+        Some("bytes") => "bytes".into(),
+        Some("run") => {
+            args.hosts = vec![Host::EarthSearch];
+            "run".into()
+        }
+        _ => usage(),
+    };
     let window = |v: &str| match v.split_once('/') {
         Some((a, b)) => (a.to_string(), b.to_string()),
         None => usage(),
     };
     let mut i = 1;
     while i < raw.len() {
+        if raw[i] == "--no-shift" {
+            args.normalise = false;
+            i += 1;
+            continue;
+        }
         let value = raw.get(i + 1).cloned().unwrap_or_else(|| usage());
         let number = || value.parse::<f64>().unwrap_or_else(|_| usage());
         match raw[i].as_str() {
@@ -91,6 +116,8 @@ fn parse_args() -> Args {
             "--max-cloud" => args.max_cloud = number(),
             "--pre" => args.pre = window(&value),
             "--post" => args.post = window(&value),
+            "--geojson" => args.geojson = Some(value.clone()),
+            "--out" => args.out = Some(value.clone()),
             _ => usage(),
         }
         i += 2;
@@ -163,7 +190,7 @@ fn mb(bytes: u64) -> String {
     format!("{:.1}", bytes as f64 / 1e6)
 }
 
-async fn run_host(client: &reqwest::Client, host: Host, args: &Args) -> Result<(), String> {
+async fn bytes_host(client: &reqwest::Client, host: Host, args: &Args) -> Result<(), String> {
     let bbox = square(args.lat, args.lon, args.ha);
     let params = |w: &(String, String)| SearchParams {
         bbox,
@@ -204,12 +231,12 @@ async fn run_host(client: &reqwest::Client, host: Host, args: &Args) -> Result<(
     let reads: Vec<Read> = reads_for(&pre).into_iter().chain(reads_for(&post)).collect();
 
     // Headers, twelve at a time.
-    let traffic = Arc::new(Traffic::default());
+    let traffic = Traffic::default();
     let clock = Instant::now();
     let urls: BTreeSet<String> = reads.iter().map(|r| r.url.clone()).collect();
     let opened: Vec<Result<Cog, String>> = stream::iter(urls)
         .map(|url| {
-            let traffic = traffic.clone();
+            let traffic = &traffic;
             async move { cog::open(client, &url, traffic).await }
         })
         .buffer_unordered(CONCURRENCY)
@@ -239,7 +266,7 @@ async fn run_host(client: &reqwest::Client, host: Host, args: &Args) -> Result<(
         t.files += 1;
         t.native = c.levels[0].resolution;
         t.tiles.insert((c.levels[js].tile_width, c.levels[js].tile_height));
-        t.compression = c.levels[0].compression.clone();
+        t.compression = match c.levels[0].compression { 8 | 32946 => "Deflate".into(), 1 => "None".into(), n => n.to_string() };
         t.js_unique += c.tile_bytes(js, &js_tiles);
         t.js_blocks += c.block_rounded_bytes(js, &js_tiles, 65_536);
         t.at_20m += c.tile_bytes(l20, &tiles_20);
@@ -261,8 +288,8 @@ async fn run_host(client: &reqwest::Client, host: Host, args: &Args) -> Result<(
     println!(
         "  search {search_seconds:.2} s; headers {header_seconds:.2} s, {} files, {} requests, {} MB",
         cogs.len(),
-        traffic.requests.load(Ordering::Relaxed),
-        mb(traffic.bytes.load(Ordering::Relaxed))
+        traffic.requests(),
+        mb(traffic.bytes())
     );
     println!("  band  files native tile       compression  geotiff.js MB: once | 64 KiB blocks | per block   20 m MB  uncompressed MB");
     let mut total = Tally::default();
@@ -299,6 +326,84 @@ async fn run_host(client: &reqwest::Client, host: Host, args: &Args) -> Result<(
     Ok(())
 }
 
+/// The whole check, with files written to `--out` if given.
+async fn run_check(client: &reqwest::Client, host: Host, args: &Args) -> Result<(), String> {
+    let aoi = match &args.geojson {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+            let geometry = serde_json::from_str(&text).map_err(|e| format!("{path} is not GeoJSON: {e}"))?;
+            Aoi::Geojson { geometry }
+        }
+        None => Aoi::Rectangle { bbox: square(args.lat, args.lon, args.ha) },
+    };
+    let params = RunParams {
+        aoi,
+        pre_start: args.pre.0.clone(),
+        pre_end: args.pre.1.clone(),
+        post_start: args.post.0.clone(),
+        post_end: args.post.1.clone(),
+        host,
+        normalise: args.normalise,
+        max_cloud: args.max_cloud,
+        mask: Default::default(),
+        concurrency: 12,
+    };
+    let progress = |message: &str, fraction: f64| eprintln!("  {:>3.0}%  {message}", fraction * 100.0);
+    let result = run::run(client, &params, &progress).await?;
+
+    let s = &result.stats;
+    println!("{}, EPSG:{} grid {} x {} px, observations {}+{}", result.host, result.epsg, result.grid_width, result.grid_height, result.pre.len(), result.post.len());
+    println!(
+        "  total {:.2} s = search {:.2} + headers {:.2} + download {:.2} + decode {:.2} + method {:.2} + draw {:.2}",
+        s.total_s, s.search_s, s.headers_s, s.download_s, s.decode_s, s.method_s, s.draw_s
+    );
+    println!("  {} requests, {} MB, {} files, {} blocks", s.requests, mb(s.bytes), s.files, s.blocks);
+    for d in &result.deltas {
+        println!(
+            "  {}: shift {} ({:+.4}), breaks used {:.4}/{:.4}/{:.4}, class pixel counts for the port check {:?}, {} flagged patches",
+            d.id.name(),
+            if d.breaks_used == d.breaks_default { "not applied" } else { "applied" },
+            d.normalisation.offset,
+            d.breaks_used.low,
+            d.breaks_used.moderate,
+            d.breaks_used.high,
+            d.class_counts,
+            d.patches_total
+        );
+    }
+    for w in &result.warnings {
+        println!("  warning: {w}");
+    }
+
+    if let Some(out) = &args.out {
+        std::fs::create_dir_all(out).map_err(|e| format!("{out}: {e}"))?;
+        for layer in &result.layers {
+            std::fs::write(format!("{out}/{}.png", layer.key), &layer.png).map_err(|e| e.to_string())?;
+        }
+        let mut csv = String::from("delta,meaning,class,latitude,longitude,peak_value,pre_window,post_window\n");
+        for p in &result.patches {
+            csv += &format!(
+                "{},{},{},{:.6},{:.6},{:.3},{}/{},{}/{}\n",
+                p.delta.name(),
+                result.deltas.iter().find(|d| d.id == p.delta).map(|d| d.meaning.as_str()).unwrap_or(""),
+                if p.class == 3 { "high" } else { "moderate" },
+                p.lat,
+                p.lon,
+                p.peak,
+                args.pre.0,
+                args.pre.1,
+                args.post.0,
+                args.post.1
+            );
+        }
+        std::fs::write(format!("{out}/flagged-patches.csv"), csv).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?;
+        std::fs::write(format!("{out}/result.json"), json).map_err(|e| e.to_string())?;
+        println!("  wrote {out}/");
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     let args = parse_args();
@@ -307,8 +412,14 @@ async fn main() {
         .build()
         .expect("HTTP client");
     for &host in &args.hosts {
-        if let Err(e) = run_host(&client, host, &args).await {
+        let outcome = if args.command == "run" {
+            run_check(&client, host, &args).await
+        } else {
+            bytes_host(&client, host, &args).await
+        };
+        if let Err(e) = outcome {
             eprintln!("{}: {e}", host.name());
+            std::process::exit(1);
         }
     }
 }
