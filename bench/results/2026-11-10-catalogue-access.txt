@@ -1,0 +1,17 @@
+Earth Search | sentinel-2-l2a | search 200, cors * | asset red https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/  | read 206, cors *
+Earth Search | sentinel-2-c1-l2a | search 200, cors * | asset red https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sent  | read 206, cors *
+Earth Search | sentinel-2-l1c | search 200, cors * | asset red is s3://sentinel-s2-l1c/tiles/10/T/EP/2025/8/29/0/B04.jp2, no https alternate
+Earth Search | landsat-c2-l2 | search 200, cors * | asset red is s3://usgs-landsat/collection02/level-2/standard/oli-tirs/202, no https alternate
+Earth Search | sentinel-1-grd | search 200, cors * | asset vh is s3://sentinel-s1-l1c/GRD/2025/8/29/IW/DV/S1C_IW_GRDH_1SDV_20, no https alternate
+Planetary Computer | sentinel-2-l2a | search 200, cors * | asset B04 https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/10/T/EP/2025 token ok | read 206, cors *
+Planetary Computer | landsat-c2-l2 | search 200, cors * | asset red https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standar token ok | read 206, cors *
+Planetary Computer | landsat-c2-l1 | search 200, cors * | no item returned
+Planetary Computer | sentinel-1-rtc | search 200, cors * | asset vh https://sentinel1euwestrtc.blob.core.windows.net/sentinel1-grd-rtc/GRD token ok | read 206, cors *
+Planetary Computer | sentinel-1-grd | search 200, cors * | asset vh https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2025/8/29/IW/ token ok | read 206, cors *
+USGS LandsatLook | landsat-c2l2-sr | search 200, cors https://landsatlook.usgs.gov/stac-server | asset red https://landsatlook.usgs.gov/data/collection02/level-2/standard/etm/20  | read 200, cors none <!DOCTYPE html> <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="e
+Copernicus Data Space | sentinel-2-l2a | search None, cors none | no item returned
+NASA CMR STAC | HLSS30_2.0 | search 200, cors * | asset B04 https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/HLSS30.0  | read 401, cors none HTTP Basic: Access denied.
+
+Follow-up checks, same day:
+USGS read 200 final url https://ers.cr.usgs.gov/login?redirectUrl=https://ers.cr.usgs.gov/?redirect_url%3Dhttps%25 title b'Login - EROS Registration System'
+stac.dataspace.copernicus.eu: no address (DNS lookup failed from this machine; catalogue.dataspace.copernicus.eu and dataspace.copernicus.eu resolved)

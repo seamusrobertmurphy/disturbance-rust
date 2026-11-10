@@ -1,0 +1,10 @@
+live run, 25600 ha: 96.18 s, 2132 requests, 829.7 MB, area 25216 ha, obs 4+6, blocks 4
+  low/moderate/high ha: dNDVI 417.92/73.60/81.12; dNDMI 292.32/52.16/72.60; dNBR 3648.92/155.76/0.40
+replay run 1: 21.75 s, 2132 requests, 829.7 MB, area 25216 ha, obs 4+6, blocks 4
+  low/moderate/high ha: dNDVI 417.92/73.60/81.12; dNDMI 292.32/52.16/72.60; dNBR 3648.92/155.76/0.40
+replay run 2: 21.59 s, 2132 requests, 829.7 MB, area 25216 ha, obs 4+6, blocks 4
+  low/moderate/high ha: dNDVI 417.92/73.60/81.12; dNDMI 292.32/52.16/72.60; dNBR 3648.92/155.76/0.40
+split (replayed): total 21.59 s = search 0.00 + read and decode 19.47 + median 1.54 + deltas and histogram 0.03 + classify 0.01 + paint 0.54; misses 0
+network waiting, live minus replay: 74.59 s of 96.18 s
+      161.22 real       106.70 user         5.07 sys
+          1260155904  peak memory footprint
