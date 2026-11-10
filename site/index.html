@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canopy Disturbance Check</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1f2421; --muted: #5d655f; --line: #d9dcd6;
+    --accent: #2f6b3c; --accent-ink: #ffffff; --warn-bg: #fff6e0; --warn-line: #e3c069;
+    --error-bg: #fdecea; --error-line: #d9837a; --row-hover: #eef3ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161a17; --panel: #1f2420; --ink: #e8ebe7; --muted: #a3aba5; --line: #3a413c;
+      --accent: #5fae6f; --accent-ink: #0d140f; --warn-bg: #3a3220; --warn-line: #8c7536;
+      --error-bg: #3d2421; --error-line: #a0574f; --row-hover: #283029;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161a17; --panel: #1f2420; --ink: #e8ebe7; --muted: #a3aba5; --line: #3a413c;
+    --accent: #5fae6f; --accent-ink: #0d140f; --warn-bg: #3a3220; --warn-line: #8c7536;
+    --error-bg: #3d2421; --error-line: #a0574f; --row-hover: #283029;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; }
+  header { padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #panel { width: 400px; max-width: 100%; overflow-y: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 4px 16px 24px; }
+  #map { flex: 1; min-height: 320px; }
+  section { border-bottom: 1px solid var(--line); padding: 12px 0; }
+  section:last-child { border-bottom: 0; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  h2 .n { display: inline-block; width: 22px; height: 22px; border-radius: 11px; background: var(--accent); color: var(--accent-ink); text-align: center; font-size: 13px; line-height: 22px; margin-right: 6px; }
+  h3 { font-size: 14px; margin: 14px 0 6px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+  .row label { min-width: 52px; color: var(--muted); }
+  input[type=date], select, input[type=number] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; width: 100%; padding: 9px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .muted { color: var(--muted); font-size: 13px; }
+  details summary { cursor: pointer; font-weight: 600; }
+  details .row { margin-left: 2px; }
+  progress { width: 100%; height: 10px; }
+  .note { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; font-size: 13px; }
+  .error { background: var(--error-bg); border: 1px solid var(--error-line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr.click { cursor: pointer; }
+  tbody tr.click:hover { background: var(--row-hover); }
+  .tabs { display: flex; gap: 4px; margin: 6px 0; }
+  .tabs button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 3px; border: 1px solid rgba(0,0,0,.2); }
+  .layer { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .layer .legend { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .pixelated { image-rendering: pixelated; }
+  ul.plain { margin: 4px 0; padding-left: 18px; }
+  @media (max-width: 760px) {
+    main { flex-direction: column-reverse; }
+    #panel { width: 100%; border-right: 0; border-top: 1px solid var(--line); }
+    #map { flex: none; height: 55vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Canopy disturbance check</h1>
+  <p>Sentinel-2 change between two date windows, following the SOP for ACR IFM verification. Runs in this browser; nothing is uploaded.</p>
+</header>
+<main>
+  <div id="panel">
+    <section>
+      <h2><span class="n">1</span>Project boundary</h2>
+      <div class="row">
+        <button id="draw-rect">Draw a rectangle</button>
+        <button id="draw-poly">Draw a polygon</button>
+        <button id="upload">Upload a file</button>
+        <input id="file" type="file" accept=".geojson,.json,.zip,.kml" hidden>
+      </div>
+      <div class="muted">A file can be GeoJSON, KML, or a zipped shapefile.</div>
+      <div id="aoi-status" class="muted"></div>
+    </section>
+
+    <section>
+      <h2><span class="n">2</span>Dates</h2>
+      <div class="row"><label for="pre-start">Before</label><input id="pre-start" type="date" value="2025-08-01"> to <input id="pre-end" type="date" value="2025-09-01"></div>
+      <div class="row"><label for="post-start">After</label><input id="post-start" type="date" value="2026-08-01"> to <input id="post-end" type="date" value="2026-09-01"></div>
+      <div class="muted">Each window's clear views are combined into one picture by taking the middle value of each pixel. The SOP uses 1 August to 1 September.</div>
+    </section>
+
+    <section>
+      <details>
+        <summary>Settings</summary>
+        <div class="row"><label for="host">Images</label>
+          <select id="host">
+            <option value="earth-search">Earth Search on AWS (the checker's source)</option>
+            <option value="planetary-computer">Microsoft Planetary Computer</option>
+          </select>
+        </div>
+        <div class="row"><label for="cloud">Clouds</label><input id="cloud" type="number" min="1" max="100" value="30"> <span class="muted">per cent, the most cloud a scene may have</span></div>
+        <div class="row"><input id="shift" type="checkbox" checked><label for="shift" style="min-width:0">Correct a scene-wide shift</label></div>
+        <div class="muted" style="margin-left:24px">If a dry summer moves all unchanged forest by the same amount, move the thresholds by that amount. The checker does this; the SOP does not.</div>
+        <div class="row"><input id="cast" type="checkbox" checked><label for="cast" style="min-width:0">Drop terrain shadow</label></div>
+        <div class="row"><input id="snow" type="checkbox" checked><label for="snow" style="min-width:0">Drop snow and ice</label></div>
+      </details>
+    </section>
+
+    <section>
+      <button id="run" class="primary" disabled>Run the check</button>
+      <div id="progress-box" hidden>
+        <progress id="progress" max="1" value="0"></progress>
+        <div class="row"><span id="progress-text" class="muted"></span><button id="cancel" style="margin-left:auto">Cancel</button></div>
+      </div>
+      <div id="error" class="error" hidden></div>
+    </section>
+
+    <div id="results" hidden>
+      <section>
+        <h2>Results</h2>
+        <div id="summary"></div>
+        <div id="warnings"></div>
+      </section>
+      <section>
+        <h3 style="margin-top:0">Map layers</h3>
+        <div id="layers"></div>
+        <div class="row"><label for="opacity">Opacity</label><input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85"></div>
+      </section>
+      <section>
+        <h3 style="margin-top:0">Flagged patches</h3>
+        <div class="muted">Touching pixels classed moderate or high on one index, highest class first, larger first. Click a row to zoom to it. Areas are not shown, because the changes have not been checked on the ground.</div>
+        <div class="tabs" id="tabs"></div>
+        <div id="patches"></div>
+        <div class="row"><button id="csv">Download the table as CSV</button></div>
+      </section>
+      <section>
+        <h3 style="margin-top:0">Thresholds used</h3>
+        <div id="breaks"></div>
+      </section>
+      <section>
+        <h3 style="margin-top:0">Views used</h3>
+        <div id="views"></div>
+      </section>
+    </div>
+
+    <section>
+      <details>
+        <summary>How the check works</summary>
+        <p class="muted">It searches a public catalogue of Sentinel-2 scenes, using the STAC standard, for each date window. It drops cloud, shadow and snow using the scene classification that comes with each scene. It takes the middle value of each 20 m pixel across the clear views. From those it computes three indices: NDVI for canopy greenness, NDMI for canopy moisture and NBR for burning. The change in each index between the windows is split into low, moderate and high classes at the SOP's thresholds. Pixels that were water in either window are left out.</p>
+        <p class="muted">The method is a port of the disturbance checker, version 0.14.3, and gives the same class for every pixel.</p>
+      </details>
+    </section>
+  </div>
+  <div id="map"></div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/shpjs@4.0.4/dist/shp.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tmcw/togeojson@5.8.1/dist/togeojson.umd.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
