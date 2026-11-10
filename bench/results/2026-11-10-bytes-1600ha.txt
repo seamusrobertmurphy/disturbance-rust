@@ -1,0 +1,31 @@
+./target/release/disturbance bytes --ha 1600
+Earth Search, 1600 ha square at 44, -122.5
+  grid EPSG:32610 203 x 202 px at 20 m, 1 blocks; observations 4+6; band reads 84; DN offsets subtracted {"0"}
+  search 0.49 s; headers 1.34 s, 84 files, 84 requests, 2.8 MB
+  band  files native tile       compression  geotiff.js MB: once | 64 KiB blocks | per block   20 m MB  uncompressed MB
+  B02       6   10 m 1024       Deflate            16.0 |          16.4 |      16.0       4.1        0.5
+  B03       6   10 m 1024       Deflate            16.7 |          17.1 |      16.7       4.3        0.5
+  B04      10   10 m 1024       Deflate            28.3 |          28.9 |      28.3       7.3        0.8
+  B08      10   10 m 1024       Deflate            32.8 |          33.3 |      32.8       8.3        0.8
+  B8A      10   20 m 512        Deflate             8.2 |           8.8 |       8.2       8.2        0.8
+  B11      10   20 m 1024       Deflate            30.9 |          31.5 |      30.9      30.9        0.8
+  B12      10   20 m 512        Deflate             7.6 |           8.2 |       7.6       7.6        0.8
+  SCL      10   20 m 512        Deflate             0.5 |           1.3 |       0.5       0.5        0.4
+  AOT       6   60 m 256        Deflate             0.1 |           0.5 |       0.1       0.1        0.5
+  WVP       6   10 m 1024       Deflate             4.8 |           5.0 |       4.8       3.8        0.5
+  total    84                                      145.8 |         150.9 |     145.8      75.1        6.5
+Planetary Computer, 1600 ha square at 44, -122.5
+  grid EPSG:32610 203 x 202 px at 20 m, 1 blocks; observations 4+6; band reads 84; DN offsets subtracted {"1000"}
+  search 0.91 s; headers 2.38 s, 84 files, 84 requests, 2.8 MB
+  band  files native tile       compression  geotiff.js MB: once | 64 KiB blocks | per block   20 m MB  uncompressed MB
+  B02       6   10 m 512        Deflate             5.2 |           5.6 |       5.2       5.3        0.5
+  B03       6   10 m 512        Deflate             5.3 |           5.7 |       5.3       5.4        0.5
+  B04      10   10 m 512        Deflate             9.0 |           9.7 |       9.0       9.1        0.8
+  B08      10   10 m 512        Deflate             9.6 |          10.3 |       9.6       9.7        0.8
+  B8A      10   20 m 512        Deflate             9.6 |          10.1 |       9.6       9.6        0.8
+  B11      10   20 m 512        Deflate             9.5 |          10.2 |       9.5       9.5        0.8
+  B12      10   20 m 512        Deflate             9.3 |           9.9 |       9.3       9.3        0.8
+  SCL      10   20 m 512        Deflate             0.4 |           1.0 |       0.4       0.4        0.4
+  AOT       6   10 m 512        Deflate             0.2 |           0.4 |       0.2       0.6        0.5
+  WVP       6   10 m 512        Deflate             1.7 |           2.2 |       1.7       5.1        0.5
+  total    84                                       59.8 |          65.0 |      59.8      64.1        6.5
