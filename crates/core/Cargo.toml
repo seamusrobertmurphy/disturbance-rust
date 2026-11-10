@@ -1,0 +1,19 @@
+[package]
+name = "disturbance-core"
+description = "The disturbance check itself: scene search, image reading and the method."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# STAC types from the stac-utils project.
+stac = "0.17"
+serde_json = "1"
+# HTTP. No TLS feature here: the CLI adds one, and a browser brings its own.
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
+# Pure-Rust GeoTIFF reading, without its cloud-storage extras.
+async-tiff = { version = "0.4", default-features = false, features = ["reqwest"] }
+# Rust port of proj4js, the projection library the checker uses.
+proj4rs = "0.3"
+futures = "0.3"
+async-trait = "0.1"
+bytes = "1"
