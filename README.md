@@ -8,7 +8,7 @@ Open <https://seamusrobertmurphy.github.io/disturbance-rust/> in Chrome, Edge, F
 
 1. Give the project boundary. Draw a rectangle or a polygon on the map, or upload a GeoJSON, KML or zipped shapefile.
 2. Pick the two date windows. The SOP uses 1 August to 1 September of each year.
-3. Press Run the check. A project of a few thousand hectares takes under a minute on a good connection.
+3. Press Run the check. Most of the wait is spent downloading the images, so the time depends on the connection. On 10 November 2026, a 1,600 ha square took 16 seconds and a 530 ha box took 60 seconds, because its images downloaded more slowly.
 
 Your boundary never leaves your computer. The browser downloads the satellite images itself and does every calculation on your machine.
 
