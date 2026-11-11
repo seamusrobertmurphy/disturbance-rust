@@ -111,6 +111,8 @@
         <div class="muted" style="margin-left:24px">If a dry summer moves all unchanged forest by the same amount, move the thresholds by that amount. The checker does this; the SOP does not.</div>
         <div class="row"><input id="cast" type="checkbox" checked><label for="cast" style="min-width:0">Drop terrain shadow</label></div>
         <div class="row"><input id="snow" type="checkbox" checked><label for="snow" style="min-width:0">Drop snow and ice</label></div>
+        <div class="row"><input id="coarse" type="checkbox"><label for="coarse" style="min-width:0">Faster download</label></div>
+        <div class="muted" style="margin-left:24px">Reads bands 2, 3, 4 and 8, which are stored at 10 m, from the 20 m copy kept inside each image file. The download is about half, but some dNDVI and dNDMI pixels move to a lower class, so results no longer match the checker. dNBR is unaffected.</div>
       </details>
     </section>
 

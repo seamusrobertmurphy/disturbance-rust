@@ -57,6 +57,12 @@ pub struct RunParams {
     /// Simultaneous downloads.
     #[serde(default = "default_concurrency")]
     pub concurrency: usize,
+    /// Read the 10 m bands from the 20 m copy stored inside each file. The
+    /// download is about half, but those bands' values are averages of four
+    /// 10 m pixels rather than one of them, so a few pixels change class
+    /// against the checker. Off by default.
+    #[serde(default)]
+    pub coarse_read: bool,
 }
 
 fn default_host() -> Host {
@@ -337,7 +343,7 @@ pub async fn run(client: &reqwest::Client, params: &RunParams, progress: &dyn Fn
     let mut files: Vec<FileRead> = Vec::with_capacity(opened.len());
     for result in opened {
         let cog = result?;
-        let level = cog.level_geotiff_js(GRID_RESOLUTION);
+        let level = if params.coarse_read { cog.level_at_most(GRID_RESOLUTION) } else { cog.level_geotiff_js(GRID_RESOLUTION) };
         let tiles_by_block: Vec<Vec<usize>> = blocks.iter().map(|b| cog.window_tiles(level, b.bbox)).collect();
         let mut last_use = HashMap::new();
         for (b, tiles) in tiles_by_block.iter().enumerate() {
