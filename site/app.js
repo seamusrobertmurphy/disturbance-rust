@@ -123,6 +123,7 @@ $("run").onclick = () => {
     max_cloud: Number($("cloud").value) || 30,
     mask: { reject_cast_shadow: $("cast").checked, reject_snow: $("snow").checked },
     concurrency: 12,
+    coarse_read: $("coarse").checked,
   };
   if (!(params.pre_start < params.pre_end && params.post_start < params.post_end)) {
     showError("Each window's start date must come before its end date.");

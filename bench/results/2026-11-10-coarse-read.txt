@@ -1,0 +1,13 @@
+The 20 m read, `disturbance run --ha 1600 --coarse`, against the full read, `disturbance run --ha 1600`.
+Earth Search, 1,600 ha square at 44.0 N, 122.5 W, August 2024 against August 2025, run on 10 November 2026 in the evening, when downloads ran at about 3.5 MB a second.
+
+Full read (the checker's pixels): 43.92 s, download 38.93 s, 148.5 MB, 168 requests.
+  dNDVI 477/75/3, dNDMI 197/10/1, dNBR 6404/72/0 pixels in low/moderate/high. Matches the checker.
+20 m read, first run: 28.43 s, download 23.31 s, 77.9 MB, 168 requests.
+20 m read, second run straight after the full read: 31.75 s, download 26.85 s, 77.9 MB.
+  dNDVI 389/44/1, dNDMI 161/3/0, dNBR 6404/72/0.
+
+dNBR reads bands 8A and 12, which are stored at 20 m, so it does not change.
+dNDVI and dNDMI read band 8 and, for dNDVI, band 4, which are stored at 10 m. Their 20 m copy averages four pixels, which lowers the moderate and high counts.
+
+What the 20 m copy holds. rasterio 1.5.0 read S2C_10TEP_20250829_0_L2A B08.tif from Earth Search, a 64 by 64 window at full resolution (pixel 4000, 4000) and the matching 32 by 32 window of the first overview. Each overview value differed from the mean of its four full-resolution pixels by at most 0.5 DN, and from the top-left pixel by up to 1315 DN, so the copy holds the four-pixel average rounded to a whole number.

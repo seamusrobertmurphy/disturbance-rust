@@ -47,6 +47,7 @@ struct Args {
     geojson: Option<String>,
     out: Option<String>,
     normalise: bool,
+    coarse_read: bool,
     hosts: Vec<Host>,
     ha: f64,
     lat: f64,
@@ -60,7 +61,7 @@ fn usage() -> ! {
     eprintln!(
         "usage: disturbance run|bytes [--host earth-search|planetary-computer|both] [--geojson FILE] [--ha 1600] \
          [--lat 44.0] [--lon -122.5] [--pre 2024-08-01/2024-09-01] [--post 2025-08-01/2025-09-01] [--max-cloud 30] \
-         [--no-shift] [--out FOLDER]"
+         [--no-shift] [--coarse] [--out FOLDER]"
     );
     std::process::exit(2)
 }
@@ -71,6 +72,7 @@ fn parse_args() -> Args {
         geojson: None,
         out: None,
         normalise: true,
+        coarse_read: false,
         hosts: vec![Host::EarthSearch, Host::PlanetaryComputer],
         ha: 1600.0,
         lat: 44.0,
@@ -96,6 +98,11 @@ fn parse_args() -> Args {
     while i < raw.len() {
         if raw[i] == "--no-shift" {
             args.normalise = false;
+            i += 1;
+            continue;
+        }
+        if raw[i] == "--coarse" {
+            args.coarse_read = true;
             i += 1;
             continue;
         }
@@ -347,6 +354,7 @@ async fn run_check(client: &reqwest::Client, host: Host, args: &Args) -> Result<
         max_cloud: args.max_cloud,
         mask: Default::default(),
         concurrency: 12,
+        coarse_read: args.coarse_read,
     };
     let progress = |message: &str, fraction: f64| eprintln!("  {:>3.0}%  {message}", fraction * 100.0);
     let result = run::run(client, &params, &progress).await?;

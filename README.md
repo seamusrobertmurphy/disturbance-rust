@@ -42,6 +42,8 @@ Pixels that were water in either window are left out. A window with fewer than f
 
 One step goes beyond the SOP and can be switched off under Settings. If a dry summer moves all the unchanged forest by the same amount, the thresholds move by that amount too. It applies only when at least half of the pixels sit within 0.05 of the unchanged peak.
 
+Settings also offer a faster download, off by default. Bands 2, 3, 4 and 8 are stored at 10 m, and each image file also keeps a 20 m copy of them. Reading that copy cut the download on the 1,600 ha test square from 148.5 MB to 77.9 MB. Each 20 m value is the average of four 10 m pixels, so fewer pixels reached the moderate class, 44 against 75 on dNDVI. dNBR uses only 20 m bands and did not change.
+
 ## Image sources
 
 The images come from two public catalogues that answer a browser with no account. Both use STAC, the common standard for searching satellite image collections.
