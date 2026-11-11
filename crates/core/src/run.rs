@@ -7,11 +7,15 @@
 //! needs it, where the checker downloads it again for each block. The pixels
 //! are the same either way.
 //!
+//! A run keeps its change values in an `Analysis`, so that `classify` can
+//! redraw the classes at new breaks without downloading anything again. The
+//! checker re-reads the imagery for that.
+//!
 //! Rust note. `async fn run(...)` returns a future, a task that has not run
 //! yet. The command-line program runs it with Tokio and the web page with the
 //! browser's own event loop, so the same code serves both, as the brief asks.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -20,8 +24,9 @@ use web_time::Instant;
 
 use crate::cog::{self, Cog, Traffic};
 use crate::composite::{self, ATMOSPHERE_BANDS, CompositeBlock, INDEX_BANDS, RGB_EXTRA_BANDS, SceneBlock};
-use crate::defaults::{AOT_DIFFERENCE_WARNING, Breaks, CLASS_NODATA, DEFAULT_MAX_CLOUD, DeltaId, MIN_STABLE_SCENE_COUNT, RGB_OBSERVATION_COUNT};
+use crate::defaults::{AOT_DIFFERENCE_WARNING, Breaks, DEFAULT_MAX_CLOUD, DeltaId, MIN_STABLE_SCENE_COUNT, RGB_OBSERVATION_COUNT, Sensor};
 use crate::deltas::{self, Histogram, Normalisation};
+use crate::diagnostics::{self, Diagnostic, HistogramAnalysis};
 use crate::grid::{self, BLOCK_SIZE, GRID_RESOLUTION, TargetGrid};
 use crate::mask::MaskOptions;
 use crate::patches::{self, Patch};
@@ -63,6 +68,31 @@ pub struct RunParams {
     /// against the checker. Off by default.
     #[serde(default)]
     pub coarse_read: bool,
+    /// Sentinel-2 light or Sentinel-1 radar.
+    #[serde(default)]
+    pub sensor: Sensor,
+    /// Breaks the operator set, by change. A change left out keeps its
+    /// defaults.
+    #[serde(default)]
+    pub breaks: BTreeMap<DeltaId, Breaks>,
+    /// Name of the reporting period, used in messages.
+    #[serde(default)]
+    pub label: String,
+}
+
+impl RunParams {
+    pub fn breaks_for(&self, id: DeltaId) -> Breaks {
+        breaks_in(&self.breaks, id)
+    }
+
+    /// The period's name for messages, "Period" when none was given.
+    pub fn period_name(&self) -> String {
+        if self.label.is_empty() { "Period".into() } else { self.label.clone() }
+    }
+}
+
+fn breaks_in(map: &BTreeMap<DeltaId, Breaks>, id: DeltaId) -> Breaks {
+    map.get(&id).copied().unwrap_or_else(|| id.default_breaks())
 }
 
 fn default_host() -> Host {
@@ -90,10 +120,17 @@ pub struct ObservationSummary {
 pub struct DeltaResult {
     pub id: DeltaId,
     pub meaning: String,
+    pub unit: String,
+    pub direction: String,
+    pub source: String,
     pub histogram: Histogram,
     pub breaks_default: Breaks,
+    /// The breaks the operator set.
+    pub breaks_set: Breaks,
+    /// The breaks the classes were drawn on, after any scene-wide shift.
     pub breaks_used: Breaks,
     pub normalisation: Normalisation,
+    pub analysis: HistogramAnalysis,
     pub patches_total: usize,
     /// Pixels per class, for checking the port against the checker only.
     #[serde(skip)]
@@ -134,8 +171,24 @@ pub struct Stats {
     pub blocks: usize,
 }
 
+/// What a radar run saw, for the panel and the run record.
+#[derive(Clone, Debug, Serialize)]
+pub struct RadarReport {
+    /// Relative orbits imaged in both windows.
+    pub orbits: Vec<u32>,
+    pub passes: Vec<String>,
+    pub pre_scenes: usize,
+    pub post_scenes: usize,
+    /// Scenes on an orbit seen in one window only, or on another UTM zone.
+    pub dropped: usize,
+    /// The median drop over the boundary, taken off every pixel, in dB.
+    pub shift_db: f64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct RunResult {
+    pub label: String,
+    pub sensor: Sensor,
     pub host: String,
     pub epsg: u32,
     pub grid_width: u32,
@@ -148,8 +201,87 @@ pub struct RunResult {
     pub observed_pixels: u64,
     pub thin_pixels: u64,
     pub atmosphere: Option<Atmosphere>,
+    pub radar: Option<RadarReport>,
     pub warnings: Vec<String>,
+    /// The SOP checks on the dates and on each histogram.
+    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
+}
+
+/// What a run keeps after it finishes, so the classes can be drawn again at
+/// new breaks without downloading anything.
+pub struct Analysis {
+    pub label: String,
+    pub sensor: Sensor,
+    pub target: TargetGrid,
+    pub warp: render::Warp,
+    /// Each change over the whole grid, NaN where there is none.
+    pub deltas: Vec<(DeltaId, Vec<f32>)>,
+    pub histograms: Vec<Histogram>,
+    pub normalisation: Vec<Normalisation>,
+}
+
+/// Classes, map layers, patches and histogram checks at one set of breaks.
+#[derive(Clone, Debug, Serialize)]
+pub struct Classified {
+    pub deltas: Vec<DeltaResult>,
+    pub layers: Vec<Layer>,
+    pub patches: Vec<Patch>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Up to this many patches per change go to the table.
+const PATCH_LIMIT: usize = 200;
+
+/// Draw the classes of every change in `analysis` at `breaks`. On the
+/// optical changes the scene-wide shift moves the breaks when `normalise` is
+/// on and the shift passed its guards; the radar drop had its shift taken off
+/// the pixels already.
+pub fn classify(analysis: &Analysis, breaks: &BTreeMap<DeltaId, Breaks>, normalise: bool) -> Result<Classified, String> {
+    let mut deltas_out = Vec::new();
+    let mut layers = Vec::new();
+    let mut patches_out = Vec::new();
+    let mut diagnostics_out = Vec::new();
+    for (k, (id, values)) in analysis.deltas.iter().enumerate() {
+        let id = *id;
+        let normalisation = analysis.normalisation[k].clone();
+        let breaks_set = breaks_in(breaks, id);
+        let breaks_used = if id.sensor() == Sensor::Sentinel2 && normalise && normalisation.applicable {
+            deltas::shift_breaks(breaks_set, normalisation.offset)
+        } else {
+            breaks_set
+        };
+        let classes = deltas::classify_delta(values, breaks_used);
+        let (found, patches_total) = patches::find_patches(id, &classes, values, &analysis.target, PATCH_LIMIT)?;
+        patches_out.extend(found);
+        let histogram_analysis = diagnostics::analyse_histogram(id, &analysis.histograms[k], breaks_set);
+        diagnostics_out.extend(histogram_analysis.diagnostics.iter().cloned().map(|mut d| {
+            d.title = format!("{} {}", analysis.label, d.title);
+            d
+        }));
+        layers.push(Layer {
+            key: id.name().into(),
+            name: format!("{} classes, {}", id.name(), id.meaning()),
+            bounds: analysis.warp.bounds,
+            png: render::png(&render::paint_classified(&classes, id.palette(), &analysis.warp), analysis.warp.width, analysis.warp.height)?,
+        });
+        deltas_out.push(DeltaResult {
+            id,
+            meaning: id.meaning().into(),
+            unit: id.unit().into(),
+            direction: id.direction().into(),
+            source: id.source().into(),
+            histogram: analysis.histograms[k].clone(),
+            breaks_default: id.default_breaks(),
+            breaks_set,
+            breaks_used,
+            normalisation,
+            analysis: histogram_analysis,
+            patches_total,
+            class_counts: deltas::class_counts(&classes),
+        });
+    }
+    Ok(Classified { deltas: deltas_out, layers, patches: patches_out, diagnostics: diagnostics_out })
 }
 
 /// The two names of the Earth Search bucket. A browser holds about six
@@ -231,7 +363,7 @@ fn plan(pre: &[Observation], post: &[Observation]) -> Plan {
     Plan { windows, urls }
 }
 
-fn scatter<T: Copy>(destination: &mut [T], source: &[T], block: &grid::GridBlock, grid: &TargetGrid) {
+pub(crate) fn scatter<T: Copy>(destination: &mut [T], source: &[T], block: &grid::GridBlock, grid: &TargetGrid) {
     for row in 0..block.height as usize {
         let from = row * block.width as usize;
         let to = (block.y as usize + row) * grid.width as usize + block.x as usize;
@@ -251,17 +383,30 @@ fn summary(observations: &[Observation]) -> Vec<ObservationSummary> {
         .collect()
 }
 
-/// Run the check. `progress` receives a message and the fraction done.
-pub async fn run(client: &reqwest::Client, params: &RunParams, progress: &dyn Fn(&str, f64)) -> Result<RunResult, String> {
+/// Run the check. `progress` receives a message and the fraction done. The
+/// result goes to the page; the analysis stays behind for `classify`.
+pub async fn run(client: &reqwest::Client, params: &RunParams, progress: &dyn Fn(&str, f64)) -> Result<(RunResult, Analysis), String> {
+    match params.sensor {
+        Sensor::Sentinel2 => run_optical(client, params, progress).await,
+        Sensor::Sentinel1 => crate::radar::run(client, params, progress).await,
+    }
+}
+
+/// The boundary's box in degrees, west, south, east, north.
+pub fn aoi_bounds(aoi: &Aoi) -> Result<[f64; 4], String> {
+    match aoi {
+        Aoi::Rectangle { bbox } => Some([bbox[0].min(bbox[2]), bbox[1].min(bbox[3]), bbox[0].max(bbox[2]), bbox[1].max(bbox[3])]),
+        Aoi::Geojson { geometry } => rasterize::bounds_of(geometry),
+    }
+    .ok_or_else(|| "The boundary encloses no area. Draw a rectangle or load a boundary with at least one polygon.".to_string())
+}
+
+async fn run_optical(client: &reqwest::Client, params: &RunParams, progress: &dyn Fn(&str, f64)) -> Result<(RunResult, Analysis), String> {
     let started = Instant::now();
     let mut stats = Stats::default();
     let traffic = Traffic::default();
 
-    let bounds = match &params.aoi {
-        Aoi::Rectangle { bbox } => Some([bbox[0].min(bbox[2]), bbox[1].min(bbox[3]), bbox[0].max(bbox[2]), bbox[1].max(bbox[3])]),
-        Aoi::Geojson { geometry } => rasterize::bounds_of(geometry),
-    }
-    .ok_or("The boundary encloses no area. Draw a rectangle or load a boundary with at least one polygon.")?;
+    let bounds = aoi_bounds(&params.aoi)?;
 
     // 1. Search.
     progress("Searching the catalogue", 0.0);
@@ -504,61 +649,41 @@ pub async fn run(client: &reqwest::Client, params: &RunParams, progress: &dyn Fn
         stats.method_s += clock.elapsed().as_secs_f64();
     }
 
-    // 5. Shift, classes and patches.
+    // 5. The scene-wide shift, then classes, patches and the classified layers.
     let clock = Instant::now();
-    let mut delta_results = Vec::new();
-    let mut classified: Vec<Vec<u8>> = Vec::new();
-    let mut all_patches = Vec::new();
-    for id in DeltaId::ALL {
-        let k = deltas::delta_index(id);
-        let normalisation = deltas::normalisation_offset(&histograms[k]);
-        let breaks_default = id.default_breaks();
-        let breaks_used = if params.normalise && normalisation.applicable {
-            deltas::shift_breaks(breaks_default, normalisation.offset)
-        } else {
-            breaks_default
-        };
-        let classes = deltas::classify_delta(&delta_grid[k], breaks_used);
-        let (found, patches_total) = patches::find_patches(id, &classes, &delta_grid[k], &target, 200)?;
-        all_patches.extend(found);
-        delta_results.push(DeltaResult {
-            id,
-            meaning: id.meaning().into(),
-            histogram: histograms[k].clone(),
-            breaks_default,
-            breaks_used,
-            normalisation,
-            patches_total,
-            class_counts: deltas::class_counts(&classes),
-        });
-        classified.push(classes);
-    }
+    let normalisation: Vec<Normalisation> = histograms.iter().map(deltas::normalisation_offset).collect();
+    let warp = render::build_warp(&target, 2048)?;
+    let [d0, d1, d2] = delta_grid;
+    let analysis = Analysis {
+        label: params.period_name(),
+        sensor: Sensor::Sentinel2,
+        target,
+        warp,
+        deltas: vec![(DeltaId::DNdvi, d0), (DeltaId::DNdmi, d1), (DeltaId::DNbr, d2)],
+        histograms: histograms.to_vec(),
+        normalisation,
+    };
+    progress("Drawing the map layers", 0.92);
+    let classified = classify(&analysis, &params.breaks, params.normalise)?;
     stats.method_s += clock.elapsed().as_secs_f64();
 
-    // 6. Map images.
-    progress("Drawing the map layers", 0.92);
+    // 6. True-colour layers, beneath the classes.
     let clock = Instant::now();
-    let warp = render::build_warp(&target, 2048)?;
     let mut layers = Vec::new();
     for (w, name) in [(0, "Before, true colour"), (1, "After, true colour")] {
         let [r, g, b] = &rgb_grid[w];
         layers.push(Layer {
             key: if w == 0 { "pre-rgb".into() } else { "post-rgb".into() },
             name: name.into(),
-            bounds: warp.bounds,
-            png: render::png(&render::paint_rgb(r, g, b, &warp), warp.width, warp.height)?,
+            bounds: analysis.warp.bounds,
+            png: render::png(&render::paint_rgb(r, g, b, &analysis.warp), analysis.warp.width, analysis.warp.height)?,
         });
     }
-    for id in DeltaId::ALL {
-        let k = deltas::delta_index(id);
-        layers.push(Layer {
-            key: id.name().into(),
-            name: format!("{} classes, {}", id.name(), id.meaning()),
-            bounds: warp.bounds,
-            png: render::png(&render::paint_classified(&classified[k], id.palette(), &warp), warp.width, warp.height)?,
-        });
-    }
+    layers.extend(classified.layers);
     stats.draw_s = clock.elapsed().as_secs_f64();
+
+    let mut diagnostics_out = diagnostics::check_period(&analysis.label, &params.pre_start, &params.pre_end, &params.post_start, &params.post_end);
+    diagnostics_out.extend(classified.diagnostics);
 
     if thin_pixels > 0 && observed_pixels > 0 {
         let share = 100.0 * thin_pixels as f64 / observed_pixels as f64;
@@ -587,26 +712,29 @@ pub async fn run(client: &reqwest::Client, params: &RunParams, progress: &dyn Fn
             None
         }
     };
-    let _ = CLASS_NODATA;
-
     stats.bytes = traffic.bytes();
     stats.requests = traffic.requests();
     stats.total_s = started.elapsed().as_secs_f64();
     progress("Done", 1.0);
-    Ok(RunResult {
+    let result = RunResult {
+        label: analysis.label.clone(),
+        sensor: Sensor::Sentinel2,
         host: params.host.name().into(),
         epsg,
-        grid_width: target.width,
-        grid_height: target.height,
+        grid_width: analysis.target.width,
+        grid_height: analysis.target.height,
         pre: summary(&pre),
         post: summary(&post),
-        deltas: delta_results,
+        deltas: classified.deltas,
         layers,
-        patches: all_patches,
+        patches: classified.patches,
         observed_pixels,
         thin_pixels,
         atmosphere,
+        radar: None,
         warnings,
+        diagnostics: diagnostics_out,
         stats,
-    })
+    };
+    Ok((result, analysis))
 }

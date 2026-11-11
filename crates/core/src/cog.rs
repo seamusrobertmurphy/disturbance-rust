@@ -56,6 +56,8 @@ pub struct Level {
     /// Pixel size in metres.
     pub resolution: f64,
     pub bits_per_sample: u16,
+    /// 1 for whole numbers, 3 for floating point, as TIFF tag 339 says.
+    pub sample_format: u16,
     pub compression: u16,
     pub predictor: u16,
     pub tile_offsets: Vec<u64>,
@@ -155,7 +157,7 @@ fn entry_values(b: &Bytes, field_type: u16, count: u64, value_at: u64, inline: u
 }
 
 /// Tags read from each image directory.
-const WANTED: [u16; 13] = [254, 256, 257, 258, 259, 277, 317, 322, 323, 324, 325, 33550, 33922];
+const WANTED: [u16; 14] = [254, 256, 257, 258, 259, 277, 317, 322, 323, 324, 325, 339, 33550, 33922];
 
 fn parse_header(url: &str, data: &[u8]) -> Result<Cog, ParseError> {
     let little = match data.get(0..2) {
@@ -238,6 +240,7 @@ fn parse_header(url: &str, data: &[u8]) -> Result<Cog, ParseError> {
             tile_height: th as u32,
             resolution: extent_x / w,
             bits_per_sample: one(tags, 258).unwrap_or(1.0) as u16,
+            sample_format: one(tags, 339).unwrap_or(1.0) as u16,
             compression: one(tags, 259).unwrap_or(1.0) as u16,
             predictor: one(tags, 317).unwrap_or(1.0) as u16,
             tile_offsets: offsets.iter().map(|&v| v as u64).collect(),
@@ -527,6 +530,119 @@ pub fn decode_tile(cog: &Cog, level: usize, compressed: &[u8]) -> Result<Vec<u16
         other => return Err(format!("{}: predictor {other} is not supported", short(&cog.url))),
     }
     Ok(out)
+}
+
+/// Decompress one tile of 32-bit floating-point samples, as the Sentinel-1
+/// RTC files on Planetary Computer store them: deflate, and TIFF's
+/// floating-point predictor (3), undone as geotiff.js 3.0.5's
+/// `decodeRowFloatingPoint` does. Whole-number tiles are read with
+/// `decode_tile` and turned into floats.
+pub fn decode_tile_f32(cog: &Cog, level: usize, compressed: &[u8]) -> Result<Vec<f32>, String> {
+    let l = &cog.levels[level];
+    if l.sample_format != 3 {
+        return Ok(decode_tile(cog, level, compressed)?.into_iter().map(|v| v as f32).collect());
+    }
+    if l.bits_per_sample != 32 {
+        return Err(format!("{}: {}-bit floating point is not supported", short(&cog.url), l.bits_per_sample));
+    }
+    let mut raw = match l.compression {
+        1 => compressed.to_vec(),
+        8 | 32946 => miniz_oxide::inflate::decompress_to_vec_zlib(compressed)
+            .map_err(|e| format!("{}: a tile would not decompress ({e:?})", short(&cog.url)))?,
+        other => return Err(format!("{}: compression {other} is not supported", short(&cog.url))),
+    };
+    let (w, h) = (l.tile_width as usize, l.tile_height as usize);
+    raw.resize(w * h * 4, 0);
+    match l.predictor {
+        1 => {}
+        3 => {
+            // Each row holds the samples' bytes as four planes, most
+            // significant first, each plane differenced byte by byte.
+            let row_bytes = w * 4;
+            let mut copy = vec![0u8; row_bytes];
+            for y in 0..h {
+                let row = &mut raw[y * row_bytes..(y + 1) * row_bytes];
+                for i in 1..row_bytes {
+                    row[i] = row[i].wrapping_add(row[i - 1]);
+                }
+                copy.copy_from_slice(row);
+                for i in 0..w {
+                    for b in 0..4 {
+                        row[4 * i + b] = copy[(4 - b - 1) * w + i];
+                    }
+                }
+            }
+        }
+        other => return Err(format!("{}: predictor {other} is not supported for floating point", short(&cog.url))),
+    }
+    let little = cog.little_endian;
+    Ok(raw
+        .chunks_exact(4)
+        .map(|c| {
+            let b = [c[0], c[1], c[2], c[3]];
+            if little { f32::from_le_bytes(b) } else { f32::from_be_bytes(b) }
+        })
+        .collect())
+}
+
+/// The window geotiff.js reads for a box, as one array of floats, row by
+/// row. Pixels off the image are 0, the fill value the checker passes.
+fn window_raster(cog: &Cog, level: usize, w: Window, tiles: &HashMap<usize, Vec<f32>>) -> Vec<f32> {
+    let l = &cog.levels[level];
+    let (ww, wh) = ((w.x1 - w.x0) as usize, (w.y1 - w.y0) as usize);
+    let (tw, th) = (l.tile_width as i64, l.tile_height as i64);
+    let across = l.tiles_across() as i64;
+    let mut out = vec![0f32; ww * wh];
+    for row in 0..wh {
+        let iy = w.y0 + row as i64;
+        if iy < 0 || iy >= l.height as i64 {
+            continue;
+        }
+        for col in 0..ww {
+            let ix = w.x0 + col as i64;
+            if ix < 0 || ix >= l.width as i64 {
+                continue;
+            }
+            if let Some(tile) = tiles.get(&(((iy / th) * across + ix / tw) as usize)) {
+                out[row * ww + col] = tile[((iy % th) * tw + ix % tw) as usize];
+            }
+        }
+    }
+    out
+}
+
+/// Pixels of one grid block from one file with geotiff.js 3.0.5's bilinear
+/// resampling, which the checker's radar run asks for. The window is read
+/// whole, then each output pixel is a blend of its four neighbours, stored
+/// as a 32-bit float because the source array is one.
+pub fn sample_block_bilinear(cog: &Cog, level: usize, bbox: [f64; 4], width: u32, height: u32, tiles: &HashMap<usize, Vec<f32>>) -> Vec<f32> {
+    let w = cog.window(level, bbox);
+    let (iw, ih) = (w.x1 - w.x0, w.y1 - w.y0);
+    let mut out = vec![0f32; (width * height) as usize];
+    if iw <= 0 || ih <= 0 {
+        return out;
+    }
+    let raster = window_raster(cog, level, w, tiles);
+    let (iw, ih) = (iw as usize, ih as usize);
+    let rel_x = iw as f64 / width as f64;
+    let rel_y = ih as f64 / height as f64;
+    let lerp = |v0: f64, v1: f64, t: f64| ((1.0 - t) * v0) + (t * v1);
+    for y in 0..height as usize {
+        let raw_y = rel_y * y as f64;
+        let yl = raw_y.floor() as usize;
+        let yh = (raw_y.ceil() as usize).min(ih - 1);
+        let ty = raw_y % 1.0;
+        for x in 0..width as usize {
+            let raw_x = rel_x * x as f64;
+            let tx = raw_x % 1.0;
+            let xl = raw_x.floor() as usize;
+            let xh = (raw_x.ceil() as usize).min(iw - 1);
+            let at = |r: usize, c: usize| raster.get(r * iw + c).copied().unwrap_or(f32::NAN) as f64;
+            let value = lerp(lerp(at(yl, xl), at(yl, xh), tx), lerp(at(yh, xl), at(yh, xh), tx), ty);
+            out[y * width as usize + x] = value as f32;
+        }
+    }
+    out
 }
 
 /// Pixels of one grid block from one file, as geotiff.js would return them:
