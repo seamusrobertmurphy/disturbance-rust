@@ -4,7 +4,7 @@
 use serde::Serialize;
 
 use crate::composite::CompositeBlock;
-use crate::defaults::{Breaks, CLASS_NODATA, DeltaId, HISTOGRAM_MAX, HISTOGRAM_MIN, HISTOGRAM_STEPS, MIN_STABLE_SHARE, STABLE_WINDOW};
+use crate::defaults::{Breaks, CLASS_NODATA, DeltaId, MIN_STABLE_SHARE, STABLE_WINDOW};
 use crate::stac::Band;
 
 fn normalized_difference(a: &[f32], b: &[f32]) -> Vec<f32> {
@@ -83,17 +83,24 @@ pub struct Histogram {
 }
 
 impl Histogram {
-    /// 130 bins from -0.5 to 0.8, with bin starts computed as the checker does.
+    /// The SOP's 130 bins from -0.5 to 0.8.
     pub fn new() -> Histogram {
-        let width = (HISTOGRAM_MAX - HISTOGRAM_MIN) / HISTOGRAM_STEPS as f64;
+        Histogram::for_delta(DeltaId::DNdvi)
+    }
+
+    /// The fixed bins of one change, with bin starts computed as the
+    /// checker's `emptyHistogram` does.
+    pub fn for_delta(id: DeltaId) -> Histogram {
+        let spec = id.histogram_spec();
+        let width = (spec.max - spec.min) / spec.steps as f64;
         Histogram {
-            starts: (0..HISTOGRAM_STEPS).map(|i| HISTOGRAM_MIN + i as f64 * width).collect(),
-            counts: vec![0; HISTOGRAM_STEPS],
+            starts: (0..spec.steps).map(|i| spec.min + i as f64 * width).collect(),
+            counts: vec![0; spec.steps],
         }
     }
 
     /// The bin width as the checker recovers it, from the first two starts.
-    fn width(&self) -> f64 {
+    pub fn width(&self) -> f64 {
         if self.starts.len() > 1 { self.starts[1] - self.starts[0] } else { 0.01 }
     }
 
@@ -130,6 +137,9 @@ pub struct Normalisation {
     pub stable_share: f64,
     pub applicable: bool,
     pub refusal: Option<String>,
+    /// "peak" for the optical shift of the breaks, "median" for the radar
+    /// drop, where the median over the boundary is always taken off the pixels.
+    pub method: &'static str,
 }
 
 /// The checker's `normalisationOffset`: the peak of unchanged ground, found
@@ -145,6 +155,7 @@ pub fn normalisation_offset(h: &Histogram) -> Normalisation {
             stable_share: 0.0,
             applicable: false,
             refusal: Some("No pixel carried a valid delta, so there was no unchanged ground to measure a shift against.".into()),
+            method: "peak",
         };
     }
     let mut peak = 0;
@@ -181,10 +192,10 @@ pub fn normalisation_offset(h: &Histogram) -> Normalisation {
             stable_share,
             applicable: false,
             refusal: Some(format!(
-                "Only {} per cent of the area sits in the unchanged peak, below the {} per cent this correction needs. On ground where most of the area changed, the peak is built by the disturbance itself and removing it would remove the finding.",
-                (stable_share * 100.0).round(),
+                "Fewer than {} per cent of the pixels sat in the unchanged peak, which this correction needs. Where most pixels changed, the peak is built by the change itself and removing it would remove the finding.",
                 (MIN_STABLE_SHARE * 100.0).round()
             )),
+            method: "peak",
         };
     }
     if offset.abs() < width {
@@ -195,9 +206,10 @@ pub fn normalisation_offset(h: &Histogram) -> Normalisation {
             refusal: Some(format!(
                 "The unchanged ground moved by {offset:.3}, less than the {width:.2} histogram bin the offset is measured on. That is not a shift worth removing."
             )),
+            method: "peak",
         };
     }
-    Normalisation { offset, stable_share, applicable: true, refusal: None }
+    Normalisation { offset, stable_share, applicable: true, refusal: None, method: "peak" }
 }
 
 pub fn shift_breaks(b: Breaks, offset: f64) -> Breaks {
@@ -216,10 +228,11 @@ pub fn class_counts(classes: &[u8]) -> [u64; 3] {
     c
 }
 
+/// Position of an optical change in the arrays `compute_deltas` returns.
 pub fn delta_index(id: DeltaId) -> usize {
     match id {
         DeltaId::DNdvi => 0,
         DeltaId::DNdmi => 1,
-        DeltaId::DNbr => 2,
+        DeltaId::DNbr | DeltaId::DVh => 2,
     }
 }

@@ -50,6 +50,21 @@ pub fn build_warp(grid: &TargetGrid, max_dimension: u32) -> Result<Warp, String>
     Ok(Warp { width, height, bounds, index })
 }
 
+/// An image where each pixel's colour comes from its grid pixel, or is
+/// transparent where `colour` gives none or the image runs off the grid.
+pub fn paint_with(warp: &Warp, mut colour: impl FnMut(usize) -> Option<[u8; 4]>) -> Vec<u8> {
+    let mut out = vec![0u8; warp.index.len() * 4];
+    for (i, &source) in warp.index.iter().enumerate() {
+        if source < 0 {
+            continue;
+        }
+        if let Some(rgba) = colour(source as usize) {
+            out[i * 4..i * 4 + 4].copy_from_slice(&rgba);
+        }
+    }
+    out
+}
+
 /// Classes 1 to 3 in the delta's colours; no change and no data transparent.
 pub fn paint_classified(classes: &[u8], palette: [[u8; 3]; 3], warp: &Warp) -> Vec<u8> {
     let mut out = vec![0u8; warp.index.len() * 4];

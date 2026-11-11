@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Instant;
 
 use disturbance_core::cog::{self, Cog, Traffic};
+use disturbance_core::defaults::Sensor;
 use disturbance_core::run::{self, Aoi, RunParams};
 use disturbance_core::grid::{self, BLOCK_SIZE, GRID_RESOLUTION};
 use disturbance_core::stac::{self, Band, Host, Observation, SearchParams};
@@ -48,6 +49,7 @@ struct Args {
     out: Option<String>,
     normalise: bool,
     coarse_read: bool,
+    sensor: Sensor,
     hosts: Vec<Host>,
     ha: f64,
     lat: f64,
@@ -61,7 +63,7 @@ fn usage() -> ! {
     eprintln!(
         "usage: disturbance run|bytes [--host earth-search|planetary-computer|both] [--geojson FILE] [--ha 1600] \
          [--lat 44.0] [--lon -122.5] [--pre 2024-08-01/2024-09-01] [--post 2025-08-01/2025-09-01] [--max-cloud 30] \
-         [--no-shift] [--coarse] [--out FOLDER]"
+         [--no-shift] [--coarse] [--sensor optical|radar] [--out FOLDER]"
     );
     std::process::exit(2)
 }
@@ -73,6 +75,7 @@ fn parse_args() -> Args {
         out: None,
         normalise: true,
         coarse_read: false,
+        sensor: Sensor::Sentinel2,
         hosts: vec![Host::EarthSearch, Host::PlanetaryComputer],
         ha: 1600.0,
         lat: 44.0,
@@ -114,6 +117,13 @@ fn parse_args() -> Args {
                     "earth-search" => vec![Host::EarthSearch],
                     "planetary-computer" => vec![Host::PlanetaryComputer],
                     "both" => vec![Host::EarthSearch, Host::PlanetaryComputer],
+                    _ => usage(),
+                }
+            }
+            "--sensor" => {
+                args.sensor = match value.as_str() {
+                    "optical" | "sentinel-2" => Sensor::Sentinel2,
+                    "radar" | "sentinel-1" => Sensor::Sentinel1,
                     _ => usage(),
                 }
             }
@@ -355,9 +365,12 @@ async fn run_check(client: &reqwest::Client, host: Host, args: &Args) -> Result<
         mask: Default::default(),
         concurrency: 12,
         coarse_read: args.coarse_read,
+        sensor: args.sensor,
+        breaks: Default::default(),
+        label: String::new(),
     };
     let progress = |message: &str, fraction: f64| eprintln!("  {:>3.0}%  {message}", fraction * 100.0);
-    let result = run::run(client, &params, &progress).await?;
+    let (result, _analysis) = run::run(client, &params, &progress).await?;
 
     let s = &result.stats;
     println!("{}, EPSG:{} grid {} x {} px, observations {}+{}", result.host, result.epsg, result.grid_width, result.grid_height, result.pre.len(), result.post.len());
@@ -370,7 +383,7 @@ async fn run_check(client: &reqwest::Client, host: Host, args: &Args) -> Result<
         println!(
             "  {}: shift {} ({:+.4}), breaks used {:.4}/{:.4}/{:.4}, class pixel counts for the port check {:?}, {} flagged patches",
             d.id.name(),
-            if d.breaks_used == d.breaks_default { "not applied" } else { "applied" },
+            if d.normalisation.method == "median" { "taken off the pixels" } else if d.breaks_used == d.breaks_set { "not applied" } else { "applied" },
             d.normalisation.offset,
             d.breaks_used.low,
             d.breaks_used.moderate,
@@ -381,6 +394,9 @@ async fn run_check(client: &reqwest::Client, host: Host, args: &Args) -> Result<
     }
     for w in &result.warnings {
         println!("  warning: {w}");
+    }
+    for d in &result.diagnostics {
+        println!("  check ({:?}): {}", d.severity, d.title);
     }
 
     if let Some(out) = &args.out {

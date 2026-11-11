@@ -1,0 +1,16 @@
+The radar check, checker against the Rust port, on 10 November 2026.
+1,600 ha square at 49.0 N, 81.0 W near Cochrane, Ontario, 5 December 2023 to 4 February 2024 against 5 December 2025 to 4 February 2026, Planetary Computer sentinel-1-rtc.
+
+Checker 0.14.3, `node out/checker-radar.mjs 1600 49.0 -81.0` (bench/checker-radar.ts):
+  EPSG:32617 grid 202 x 201, orbits 4,77 (ascending), scenes 9+7, dropped 0
+  shift -0.970729 dB, observed pixels 39748
+  dVH class pixel counts [358, 110, 5]
+  36.88 s, 358 requests, 29.5 MB
+
+Rust, `disturbance run --sensor radar --ha 1600 --lat 49.0 --lon -81.0 --pre 2023-12-05/2024-02-04 --post 2025-12-05/2026-02-04`:
+  EPSG:32617 grid 202 x 201, orbits 4, 77 (ascending), scenes 9+7
+  shift -0.9707293510437012 dB, observed pixels 39748
+  dVH class pixel counts [358, 110, 5]. Matches the checker.
+  38.81 s = search 1.05 + headers 2.98 + download 34.48 + decode 0.27 + method 0.02; 49 requests, 30.6 MB
+
+Both runs spent nearly all their time downloading, so the port is no faster on this square. The area is one 512 px block, so the checker reads each tile once, and the repeated downloads it makes on areas of several blocks do not arise here.
