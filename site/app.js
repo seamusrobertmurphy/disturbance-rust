@@ -1081,6 +1081,10 @@ $("corroborate").onclick = async () => {
     });
     state.corroboration = { ...found, years: span };
     state.corroborationLayers = found.layers;
+    // The records' rasters sit above the true-colour pictures and below the
+    // classes, so a flagged class is never hidden by a record.
+    const rasters = map.getPane("dccRasterPane");
+    if (rasters) rasters.style.zIndex = "400";
     $("corroboration").innerHTML =
       `<p class="muted">${span.from} to ${span.to}. ${found.layers.length} layer${found.layers.length === 1 ? "" : "s"} added to the layer list, switched off. Their sources are in the run record.</p>` +
       found.notes.map((n) => `<div class="note">${escapeHtml(n)}</div>`).join("") +
