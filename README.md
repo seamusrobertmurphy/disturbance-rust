@@ -88,7 +88,7 @@ The browser ran the larger square straight after the smaller one, over the same 
 
 Most of the gain comes from downloading less. The checker downloads an image tile again for each 512 by 512 pixel block of the project, while this tool downloads each tile once. The checker's times were measured by running its own code in Node with a browser's limit of six connections per server, on 10 November 2026. Download times depend on the connection.
 
-The radar check also put every pixel in the same class as the checker, on a 1,600 ha square near Cochrane, Ontario, comparing the winter of 2023 to 2024 with that of 2025 to 2026. Both took 37 to 39 seconds, nearly all of it downloading. That square is a single block, so the checker downloaded each tile only once there too.
+The radar check also matched the checker on a 1,600 ha square near Cochrane, Ontario, comparing the winter of 2023 to 2024 with that of 2025 to 2026. Each radar class held the same number of pixels, 358, 110 and 5. Both took 37 to 39 seconds, nearly all of it downloading. That square is a single block, so the checker downloaded each tile only once there too.
 
 ## For developers
 
