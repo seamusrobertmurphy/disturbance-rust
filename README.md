@@ -77,7 +77,7 @@ The season comes from NASA POWER, the dated pictures from Esri's Wayback archive
 
 ## Speed
 
-The method is a line-by-line port of the disturbance checker, version 0.14.3, written in Rust. On two square test areas near 44.0 N, 122.5 W, comparing August 2024 with August 2025, it put every pixel in the same class as the checker. It ran in less time, as the table below shows.
+The method is a line-by-line port of the disturbance checker, version 0.14.3, written in Rust. The test used two squares near 44.0 N, 122.5 W, comparing August 2024 with August 2025. On both, each class of each index held the same number of pixels as the checker's. It ran in less time, as the table below shows.
 
 | Test square | Checker | Rust, terminal | Rust, browser |
 |---|---|---|---|
