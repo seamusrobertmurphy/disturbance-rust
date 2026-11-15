@@ -90,9 +90,28 @@ Most of the gain comes from downloading less. The checker downloads an image til
 
 The radar check also matched the checker on a 1,600 ha square near Cochrane, Ontario, comparing the winter of 2023 to 2024 with that of 2025 to 2026. Each radar class held the same number of pixels, 358, 110 and 5. Both took 37 to 39 seconds, nearly all of it downloading. That square is a single block, so the checker downloaded each tile only once there too.
 
+## In a notebook
+
+The same check is a Python module, `disturbance`, for Jupyter notebooks in ArcGIS Pro or QGIS, in place of the Earth Engine API. It runs on the computer the notebook runs on and needs no account.
+
+```python
+import disturbance as dc
+
+run = dc.check("Project_Boundary.shp", pre=("2024-08-01", "2024-09-01"), post=("2025-08-01", "2025-09-01"), label="RP1")
+run.add_to_map()        # ArcGIS Pro: classes, changes and true colour in the active map
+run.plot_histograms()   # the SOP's histogram check
+run.save("outputs")     # GeoTIFFs on the UTM grid, flagged-patches.csv, run-record.json
+```
+
+`run.deltas`, `run.classes` and `run.backdrops` hold the arrays, with `run.epsg` and `run.transform` to place them. `run.reclassify(...)` draws the classes again at new breaks without downloading anything. A shapefile or feature class needs ArcGIS Pro to read it; elsewhere, give a GeoJSON file or a box.
+
+The Build the Python module workflow builds one wheel for Windows and one for Linux on every push, each serving Python 3.9 and later. A wheel is a zip file. Unzipped into a folder that the notebook adds to `sys.path`, it needs no installing, so it can sit in a shared OneDrive folder. Pushing a tag such as `v0.1.0` attaches both wheels to a release.
+
+The terminal program also writes the GeoTIFFs beside its PNGs.
+
 ## For developers
 
-The repository is a Cargo workspace of three crates. `crates/core` holds the method, `crates/cli` a terminal program and `crates/web` the bridge to the browser. The page is in `site/`, with the map layers made by others in their own files there.
+The repository is a Cargo workspace of four crates. `crates/core` holds the method, `crates/cli` a terminal program, `crates/web` the bridge to the browser and `crates/py` the Python module. The page is in `site/`, with the map layers made by others in their own files there.
 
 ```sh
 # The check in the terminal, writing map layers, the table and a JSON summary
@@ -104,6 +123,9 @@ cargo run --release -p disturbance-cli -- run --sensor radar --geojson boundary.
 # The browser build, then a local server at http://localhost:8765
 wasm-pack build crates/web --target web --out-dir ../../site/pkg --release --no-pack
 python3 -m http.server 8765 --directory site
+
+# The Python module, as a wheel in target/wheels
+cd crates/py && maturin build --release
 ```
 
 `bench/` holds the scripts and dated results behind the comparisons above.
