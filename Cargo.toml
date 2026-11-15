@@ -2,7 +2,7 @@
 # the file that pins every dependency's exact version.
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/cli", "crates/web"]
+members = ["crates/core", "crates/cli", "crates/web", "crates/py"]
 
 [workspace.package]
 version = "0.1.0"

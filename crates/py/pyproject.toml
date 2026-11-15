@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "disturbance"
+description = "The canopy disturbance check as a Python module, in place of the Earth Engine API."
+requires-python = ">=3.9"
+dependencies = ["numpy"]
+dynamic = ["version"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "disturbance._core"

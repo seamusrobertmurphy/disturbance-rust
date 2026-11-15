@@ -2,3 +2,6 @@ bench/out/
 target/
 ._*
 site/pkg/
+__pycache__/
+*.pyd
+crates/py/python/disturbance/*.so
