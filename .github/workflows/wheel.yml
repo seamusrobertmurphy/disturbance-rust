@@ -1,0 +1,60 @@
+# Builds the Python module, `disturbance`, for ArcGIS Pro on Windows, and
+# for Linux, on every push that touches the Rust, and attaches both to a
+# release when a tag such as v0.1.0 is pushed. One wheel per platform
+# serves every Python from 3.9 on.
+name: Build the Python module
+
+on:
+  # A push filter naming only tags would skip branch pushes, so both are named.
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+    paths: ["crates/**", "Cargo.*", ".github/workflows/wheel.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  wheel:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: crates/py
+          args: --release --out ../../dist
+          # Built on the runner, against its own OpenSSL; the Linux wheel
+          # is for testing, and Pro on Windows uses SChannel instead.
+          manylinux: "off"
+      # Import it the way the notebook does: unpacked into a folder on
+      # sys.path, not installed.
+      - name: Import check
+        shell: bash
+        run: |
+          python -m pip install numpy
+          python -m pip install --no-deps --target unpacked dist/*.whl
+          cd unpacked && python -c "import disturbance as dc; print('disturbance', dc.__version__)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}
+          path: dist/*.whl
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.whl
