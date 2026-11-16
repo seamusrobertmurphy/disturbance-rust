@@ -82,7 +82,8 @@ pub fn paint_classified(classes: &[u8], palette: [[u8; 3]; 3], warp: &Warp) -> V
     out
 }
 
-fn stretch(value: f32) -> u8 {
+/// One reflectance to a byte, as the true-colour layer draws it.
+pub fn stretch(value: f32) -> u8 {
     let t = ((value as f64 - RGB_MIN) / (RGB_MAX - RGB_MIN)).clamp(0.0, 1.0);
     (t.powf(1.0 / RGB_GAMMA) * 255.0).round() as u8
 }

@@ -2,4 +2,7 @@ bench/out/
 target/
 ._*
 site/pkg/
+__pycache__/
+*.pyd
+crates/py/python/disturbance/*.so
 archive/20261116_EMAIL_RustGIS-Update.pdf

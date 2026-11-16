@@ -11,6 +11,7 @@ pub mod composite;
 pub mod defaults;
 pub mod deltas;
 pub mod diagnostics;
+pub mod geotiff;
 pub mod grid;
 pub mod mask;
 pub mod patches;

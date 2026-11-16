@@ -147,6 +147,15 @@ pub struct Layer {
     pub png: Vec<u8>,
 }
 
+/// The before and after pictures on the working grid, for desktop GIS:
+/// three reflectance bands for the optical check, VH in dB for radar.
+#[derive(Clone, Debug)]
+pub struct Backdrop {
+    pub key: String,
+    pub name: String,
+    pub bands: Vec<Vec<f32>>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Atmosphere {
     pub pre_aot: f64,
@@ -206,6 +215,10 @@ pub struct RunResult {
     /// The SOP checks on the dates and on each histogram.
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
+    /// The pictures behind the PNG layers, on the grid. The page drops them
+    /// with the result; the Python module writes them as GeoTIFFs.
+    #[serde(skip)]
+    pub backdrops: Vec<Backdrop>,
 }
 
 /// What a run keeps after it finishes, so the classes can be drawn again at
@@ -735,6 +748,11 @@ async fn run_optical(client: &reqwest::Client, params: &RunParams, progress: &dy
         warnings,
         diagnostics: diagnostics_out,
         stats,
+        backdrops: rgb_grid
+            .into_iter()
+            .zip([("pre-rgb", "Before, true colour"), ("post-rgb", "After, true colour")])
+            .map(|(bands, (key, name))| Backdrop { key: key.into(), name: name.into(), bands: bands.into() })
+            .collect(),
     };
     Ok((result, analysis))
 }

@@ -533,6 +533,10 @@ pub async fn run(client: &reqwest::Client, params: &RunParams, progress: &dyn Fn
         warnings,
         diagnostics: classified.diagnostics,
         stats,
+        backdrops: vec![
+            run::Backdrop { key: "pre-vh".into(), name: "Before, radar VH".into(), bands: vec![pre_smooth] },
+            run::Backdrop { key: "post-vh".into(), name: "After, radar VH".into(), bands: vec![post_smooth] },
+        ],
     };
     Ok((result, analysis))
 }

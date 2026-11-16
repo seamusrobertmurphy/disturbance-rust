@@ -370,7 +370,7 @@ async fn run_check(client: &reqwest::Client, host: Host, args: &Args) -> Result<
         label: String::new(),
     };
     let progress = |message: &str, fraction: f64| eprintln!("  {:>3.0}%  {message}", fraction * 100.0);
-    let (result, _analysis) = run::run(client, &params, &progress).await?;
+    let (result, analysis) = run::run(client, &params, &progress).await?;
 
     let s = &result.stats;
     println!("{}, EPSG:{} grid {} x {} px, observations {}+{}", result.host, result.epsg, result.grid_width, result.grid_height, result.pre.len(), result.post.len());
@@ -419,6 +419,9 @@ async fn run_check(client: &reqwest::Client, host: Host, args: &Args) -> Result<
                 args.post.0,
                 args.post.1
             );
+        }
+        for (name, tif) in disturbance_core::geotiff::run_files(&result, &analysis) {
+            std::fs::write(format!("{out}/{name}"), tif).map_err(|e| e.to_string())?;
         }
         std::fs::write(format!("{out}/flagged-patches.csv"), csv).map_err(|e| e.to_string())?;
         let json = serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?;
