@@ -105,7 +105,7 @@ run.save("outputs")     # GeoTIFFs on the UTM grid, flagged-patches.csv, run-rec
 
 `run.deltas`, `run.classes` and `run.backdrops` hold the arrays, with `run.epsg` and `run.transform` to place them. `run.reclassify(...)` draws the classes again at new breaks without downloading anything. A shapefile or feature class needs ArcGIS Pro to read it; elsewhere, give a GeoJSON file or a box.
 
-The Build the Python module workflow builds one wheel for Windows and one for Linux on every push, each serving Python 3.9 and later. A wheel is a zip file. Unzipped into a folder that the notebook adds to `sys.path`, it needs no installing, so it can sit in a shared OneDrive folder. Pushing a tag such as `v0.1.0` attaches both wheels to a release.
+The Build the Python module workflow builds one wheel for Windows and one for Linux on every push, each serving Python 3.9 and later. A wheel is a zip file. Unzipped into a folder that the notebook adds to `sys.path`, it needs no installing, so it can sit in a shared OneDrive folder. Version 0.1.0's two wheels are on its [release page](https://github.com/seamusrobertmurphy/disturbance-rust/releases/tag/v0.1.0). Pushing a newer tag, such as `v0.1.1`, attaches that version's wheels to a release of its own.
 
 The terminal program also writes the GeoTIFFs beside its PNGs.
 
